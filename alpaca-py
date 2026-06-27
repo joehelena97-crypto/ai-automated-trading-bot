@@ -1,6 +1,6 @@
 """
 TradingView Webhook Bot – entrypoint.
-Run: python main.py
+Run: python alpaca-py
 """
 import uvicorn
 
