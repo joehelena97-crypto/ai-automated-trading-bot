@@ -11,14 +11,14 @@ _use_testnet_override: Optional[bool] = None
 
 
 def get_use_testnet(exchange_name: str) -> bool:
-    """Return whether to use testnet for this exchange. Override wins over env."""
+    """Return whether to use testnet for this exchange. Override wins over config."""
     if _use_testnet_override is not None:
         return _use_testnet_override
     name = exchange_name.lower()
     if name == "binance":
         return settings.binance_testnet
     if name == "bybit":
-        return settings.bybit_testnet
+        return settings.trading_mode == "testnet"
     if name == "okx":
         return settings.okx_sandbox
     if name == "hyperliquid":

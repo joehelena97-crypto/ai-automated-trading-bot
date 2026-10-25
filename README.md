@@ -95,7 +95,7 @@ So the bot’s **risk strategy** is: allowlist → cap size → cap per-symbol e
 
 ### Live vs testnet
 
-The **Live / Testnet** switch in the dashboard header applies to **all** configured exchanges. In **Live** mode the bot uses each exchange’s mainnet API; in **Testnet** it uses each exchange’s testnet/sandbox (Binance testnet, Bybit testnet, OKX sandbox, Hyperliquid testnet). Switching clears cached API clients so the next request uses the new network. Use testnet and test money first.
+The **Live / Testnet** switch in the dashboard header applies to **all** configured exchanges. In **Live** mode the bot uses each exchange’s mainnet API; in **Testnet** it uses each exchange’s testnet/sandbox (Binance testnet, Bybit testnet, OKX sandbox, Hyperliquid testnet). Switching clears cached API clients so the next request uses the new network. `TRADING_MODE` selects Bybit’s startup mode (`testnet` by default; set it to `live` for mainnet). Use testnet and test money first.
 
 ---
 
@@ -237,7 +237,7 @@ Copy `.env.example` to `.env` and fill in your values. For production, set `APP_
 | `BINANCE_API_KEY`, `BINANCE_API_SECRET` | Binance futures. Leave empty to disable. |
 | `BINANCE_TESTNET` | Use Binance testnet (default: false). Overridden by dashboard Live/Testnet when set. |
 | `BYBIT_API_KEY`, `BYBIT_API_SECRET` | Bybit. Leave empty to disable. |
-| `BYBIT_TESTNET` | Use Bybit testnet (default: false). |
+| `TRADING_MODE` | Bybit startup network: `testnet` (default) or `live`. Invalid values use `testnet`. |
 | `OKX_API_KEY`, `OKX_API_SECRET`, `OKX_PASSPHRASE` | OKX. Leave empty to disable. |
 | `OKX_SANDBOX` | Use OKX sandbox (default: false). |
 | `HYPERLIQUID_PRIVATE_KEY` | Hyperliquid (required). `HYPERLIQUID_WALLET_ADDRESS` optional. |

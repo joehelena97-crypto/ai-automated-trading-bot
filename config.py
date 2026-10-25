@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # Bybit
     bybit_api_key: str = ""
     bybit_api_secret: str = ""
-    bybit_testnet: bool = False
+    trading_mode: str = "testnet"
 
     # OKX
     okx_api_key: str = ""
@@ -187,6 +187,13 @@ class Settings(BaseSettings):
         if normalized not in {"development", "dev", "test", "production", "prod"}:
             raise ValueError("APP_ENV must be development, test, or production")
         return normalized
+
+    @field_validator("trading_mode", mode="before")
+    @classmethod
+    def normalize_trading_mode(cls, value: object) -> str:
+        if isinstance(value, str) and value.strip().lower() == "live":
+            return "live"
+        return "testnet"
 
     @property
     def allowed_symbols_list(self) -> List[str]:
