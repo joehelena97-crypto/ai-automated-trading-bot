@@ -42,6 +42,21 @@ def init_db() -> None:
                 value TEXT NOT NULL,
                 updated_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS admin_sessions (
+                nonce TEXT PRIMARY KEY,
+                expires_at REAL NOT NULL,
+                revoked_at REAL
+            );
+            CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry ON admin_sessions(expires_at);
+            CREATE TABLE IF NOT EXISTS rate_limit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bucket TEXT NOT NULL,
+                occurred_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_rate_limit_bucket_time
+                ON rate_limit_events(bucket, occurred_at);
+            CREATE INDEX IF NOT EXISTS idx_rate_limit_time
+                ON rate_limit_events(occurred_at);
             CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);
             CREATE INDEX IF NOT EXISTS idx_orders_exchange_symbol ON orders(exchange, symbol);
         """)
@@ -118,3 +133,62 @@ def risk_state_set(key: str, value: str) -> None:
             "INSERT OR REPLACE INTO risk_state (key, value, updated_at) VALUES (?, ?, ?)",
             (key, value, time.time()),
         )
+
+
+def create_admin_session(nonce: str, expires_at: float) -> None:
+    with get_cursor() as cur:
+        cur.execute("DELETE FROM admin_sessions WHERE expires_at <= ?", (time.time(),))
+        cur.execute(
+            "INSERT INTO admin_sessions (nonce, expires_at, revoked_at) VALUES (?, ?, NULL)",
+            (nonce, expires_at),
+        )
+
+
+def revoke_admin_session(nonce: str) -> None:
+    with get_cursor() as cur:
+        cur.execute(
+            "UPDATE admin_sessions SET revoked_at = ? WHERE nonce = ? AND revoked_at IS NULL",
+            (time.time(), nonce),
+        )
+
+
+def admin_session_is_active(nonce: str, now: float) -> bool:
+    with get_cursor() as cur:
+        cur.execute(
+            """SELECT 1 FROM admin_sessions
+               WHERE nonce = ? AND expires_at > ? AND revoked_at IS NULL""",
+            (nonce, now),
+        )
+        return cur.fetchone() is not None
+
+
+def consume_rate_limit(bucket: str, max_requests: int, window_seconds: float, now: float) -> bool:
+    conn = _get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "DELETE FROM rate_limit_events WHERE occurred_at <= ?",
+            (now - max(window_seconds, 60.0),),
+        )
+        conn.execute(
+            "DELETE FROM rate_limit_events WHERE bucket = ? AND occurred_at <= ?",
+            (bucket, now - window_seconds),
+        )
+        count = conn.execute(
+            "SELECT COUNT(*) FROM rate_limit_events WHERE bucket = ?",
+            (bucket,),
+        ).fetchone()[0]
+        if count >= max_requests:
+            conn.rollback()
+            return False
+        conn.execute(
+            "INSERT INTO rate_limit_events (bucket, occurred_at) VALUES (?, ?)",
+            (bucket, now),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

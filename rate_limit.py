@@ -1,31 +1,20 @@
-"""
-In-memory rate limiter: max N requests per minute per key (e.g. client IP or global).
-"""
+"""SQLite-backed rate limiter shared by workers using the same local database."""
 from __future__ import annotations
 
 import time
-from collections import defaultdict
-from typing import DefaultDict, List
 
 from config import settings
+from db import consume_rate_limit
 
 
 class RateLimiter:
-    def __init__(self, max_per_minute: int) -> None:
+    def __init__(self, max_per_minute: int, namespace: str = "default") -> None:
         self.max_per_minute = max_per_minute
-        self._requests: DefaultDict[str, List[float]] = defaultdict(list)
-
-    def _prune(self, key: str, now: float) -> None:
-        cutoff = now - 60.0
-        self._requests[key] = [t for t in self._requests[key] if t > cutoff]
+        self.namespace = namespace
 
     def allow(self, key: str = "global") -> bool:
-        now = time.time()
-        self._prune(key, now)
-        if len(self._requests[key]) >= self.max_per_minute:
-            return False
-        self._requests[key].append(now)
-        return True
+        bucket = f"{self.namespace}:{key}"
+        return consume_rate_limit(bucket, self.max_per_minute, 60.0, time.time())
 
 
 _limiter: RateLimiter | None = None
@@ -34,5 +23,5 @@ _limiter: RateLimiter | None = None
 def get_rate_limiter() -> RateLimiter:
     global _limiter
     if _limiter is None:
-        _limiter = RateLimiter(settings.rate_limit_per_minute)
+        _limiter = RateLimiter(settings.rate_limit_per_minute, "webhook")
     return _limiter

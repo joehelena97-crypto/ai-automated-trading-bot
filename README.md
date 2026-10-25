@@ -18,7 +18,7 @@ Your TradingView setup stays the same. When your alert fires, this bot places th
 
 ### Dashboard
 
-The **dashboard** (`GET /dashboard`) shows exchange status, USDT balance, daily PnL, recent orders, metrics, and a Live/Testnet switch. It auto-refreshes every 30 seconds.
+The **dashboard** (`GET /dashboard`) shows public exchange health, and after secure admin sign-in, daily PnL, recent orders, and a Live/Testnet switch. It auto-refreshes every 30 seconds.
 
 #### Screenshots
 
@@ -145,19 +145,19 @@ The **Live / Testnet** switch in the dashboard header applies to **all** configu
 2. **Configure**
    - Copy `.env.example` to `.env`
    - Add API keys for the exchanges you use
-   - Set `WEBHOOK_SECRET` and `REQUIRE_WEBHOOK_SECRET=true` in production
+   - Set `APP_ENV=production`, `REQUIRE_WEBHOOK_SECRET=true`, and unique random `WEBHOOK_SECRET` and `ADMIN_API_KEY` values in production. Generate secrets outside the repository and supply them through your secret manager or a mode-`0600` untracked `.env` file.
    - Tune risk limits (see Environment Variables below)
 
 3. **Run**
    ```bash
    python main.py
    ```
-   Server: `http://0.0.0.0:8000` → Webhook: `POST /webhook`
+   Local development only: `http://127.0.0.1:8000`. Admin login is disabled on HTTP. In production, expose the app only through a trusted HTTPS reverse proxy (see production deployment requirements below).
 
 4. **TradingView alert** – Send a JSON body to `POST /webhook`. Required: `secret`, `exchange`, `symbol`, `side`, `size_usdt`. Optional: `leverage`, `take_profit`, `stop_loss`, `trailing_stop`, `trailing_activation_pct`, `request_id`. Example:
    ```json
    {
-     "secret": "your_webhook_secret_here",
+     "secret": "REPLACE_WITH_YOUR_WEBHOOK_SECRET",
      "exchange": "binance",
      "symbol": "BTCUSDT",
      "side": "buy",
@@ -170,7 +170,7 @@ The **Live / Testnet** switch in the dashboard header applies to **all** configu
      "request_id": "alert-123"
    }
    ```
-   Use `request_id` (e.g. alert id) to avoid duplicate orders when the same alert fires twice. If `REQUIRE_WEBHOOK_SECRET` is false, you can send `"secret": ""`.
+   Use `request_id` (e.g. alert id) to avoid duplicate orders when the same alert fires twice. Setting `REQUIRE_WEBHOOK_SECRET=false` permits unsigned webhook requests only in non-production environments.
 
 ---
 
@@ -197,29 +197,40 @@ The **Live / Testnet** switch in the dashboard header applies to **all** configu
 | Endpoint | Description |
 |----------|-------------|
 | `GET /` | Redirects to `/dashboard`. |
-| `GET /dashboard` | **Dashboard**: exchange status, USDT balance, daily PnL, recent orders, metrics, Live/Testnet switch. Auto-refresh every 30s. |
+| `GET /dashboard` | **Dashboard**: exchange status, daily PnL, recent orders, and Live/Testnet switch. Auto-refresh every 30s. Protected API data and controls require a secure admin session. |
+| `GET /admin/login` | Script-free HTTPS form for admin sign-in. |
+| `POST /admin/session` | Validate the form-submitted admin key over HTTPS and set a secure HttpOnly session cookie. |
+| `POST /admin/session/logout` | Clear the current admin session cookie. |
 | `POST /webhook` | TradingView webhook; optional AI enhancer + advisor, then risk + execution. |
 | `POST /signals/generate` | AI signal (buy/sell/hold); optional `execute=true` for same risk + execution as webhook. |
 | `GET /health` | Liveness. |
-| `GET /health/exchanges` | Per-exchange connectivity (balance/read check). |
-| `GET /exchanges/status` | Which exchanges are connected (allowed to receive orders). |
-| `PUT /exchanges/status` | Set connect/disconnect per exchange. Body: `{"binance": true, "bybit": false, ...}`. |
-| `GET /balance` | USDT balance per exchange (from `fetch_balance`). `null` if exchange disconnected or unavailable. |
-| `GET /metrics` | Counters: webhooks received/duplicate/rate-limited/auth failed/risk rejected, orders placed/failed/dry_run, tpsl_placed/failed, errors. |
-| `GET /status` | Recent orders, daily PnL by exchange, cooldown, dry_run, use_testnet. |
-| `PUT /settings/network` | Switch all exchanges between live and testnet. Body: `{"use_testnet": true \| false}`. Clears cached API clients. |
+| `GET /health/exchanges` | Public read-only connectivity status; no balances or upstream error details. |
+| `GET /exchanges/status` | Which exchanges are connected (allowed to receive orders). Requires admin authorization. |
+| `PUT /exchanges/status` | Set connect/disconnect per exchange. Requires admin authorization. Body: `{"binance": true, "bybit": false, ...}`. |
+| `GET /balance` | USDT balance per exchange. Requires admin authorization. |
+| `GET /metrics` | Operational counters. Requires admin authorization. |
+| `GET /status` | Recent orders, daily PnL by exchange, cooldown, dry_run, use_testnet. Requires admin authorization. |
+| `PUT /settings/network` | Switch all exchanges between live and testnet. Requires admin authorization. Body: `{"use_testnet": true \| false}`. Clears cached API clients. |
+
+Admin endpoints require a secure dashboard session. Sign in through the separate, script-free `/admin/login` form using `ADMIN_API_KEY`; the server validates the form submission over HTTPS and sets a one-hour, signed, `HttpOnly`, `Secure`, `SameSite=Strict` session cookie. Session IDs are stored in SQLite; logout revokes the session server-side, including copied-cookie replay, and expiration is checked server-side. The dashboard and its JavaScript never contain or handle the key; it is not stored in browser storage, returned by the server, or sent to protected endpoints. Admin login and endpoints reject requests unless FastAPI sees HTTPS; requests are only considered HTTPS when they are direct TLS or carry trusted proxy forwarding headers from an IP in `TRUSTED_PROXY_IPS`. Admin writes also require a same-origin `Origin` header. Use a random key of at least 32 characters. Supply the key through a secret manager or an untracked `.env` file, never source control. `APP_ENV=production` fails startup if the webhook/admin keys are absent, short, placeholder/example/default, or if webhook auth is disabled. It also requires owner-only permissions on a present `.env` file. Any configured exchange credentials and enabled AI secrets are checked for placeholders; partial exchange credential sets fail startup. Admin routes return HTTP 503 if no valid-length key is configured and HTTP 401 for missing or invalid sessions. `POST /signals/generate` also requires a session when `execute=true`.
+
+**Production HTTPS requirements:** Terminate TLS at the trusted reverse proxy, redirect ordinary HTTP page requests to HTTPS, but reject HTTP requests to admin login/session endpoints without forwarding their request bodies. Overwrite (do not append or trust client-supplied) `X-Forwarded-Proto` with the actual connection scheme, preserve the public `Host` header, and firewall the application port so only the proxy can reach it. Set `TRUSTED_PROXY_IPS` to the exact proxy source IP(s), not `*`; the default trusts loopback only. When proxy and app share a host, bind the app to `HOST=127.0.0.1`; in container deployments bind only to a private container network accessible to the proxy. Do not expose the app port publicly or transmit admin credentials over HTTP. Ensure the proxy and application do not log request bodies for `/admin/session` or log session cookies. Configure HTTPS for TradingView webhook delivery as well.
+
+Exchange health checks make a public `fetch_time` request only. `healthy` means the exchange's public API responded with a valid timestamp; it does not verify private API credentials, permissions, balances, or trade readiness. Each supported exchange is reported as `unconfigured` when its required credentials are absent. Overall `healthy` and `degraded` responses use HTTP 200; `unavailable` and `unconfigured` use HTTP 503. Public health checks are limited to 60 requests per minute, admin login to 5 requests per minute, and webhooks and enabled AI signal generation to `RATE_LIMIT_PER_MINUTE`; webhook limits apply before payload parsing and duplicate detection. These counters are stored transactionally in SQLite and are shared across workers using the same local `DB_PATH`. The rest of the bot has process-local runtime/exchange state, so the supported deployment is one application instance on one host. For multiple hosts, use gateway-level shared rate limits and a shared session-revocation store; SQLite database files must not be shared over network filesystems. Multi-worker behavior beyond the database-backed counters is not supported.
 
 ---
 
 ## ⚙️ Environment Variables
 
-Copy `.env.example` to `.env` and fill in your values. All variables are optional except those needed for the features you use.
+Copy `.env.example` to `.env` and fill in your values. For production, set `APP_ENV=production` and replace every placeholder secret before startup. Keep `.env` untracked and set its permissions to `0600`, or inject secrets from a secret manager.
 
 | Variable | Description |
 |----------|-------------|
 | **Webhook** | |
 | `WEBHOOK_SECRET` | Must match `secret` in webhook body when `REQUIRE_WEBHOOK_SECRET=true`. Leave empty to allow any secret when requirement is false. |
-| `REQUIRE_WEBHOOK_SECRET` | Reject wrong/missing secret (default: true). If true and `WEBHOOK_SECRET` is empty, all requests pass. |
+| `REQUIRE_WEBHOOK_SECRET` | Reject wrong/missing webhook secrets (default: true); must be true in production. Empty configured secrets never authorize when required. |
+| `APP_ENV` | `development`, `test`, or `production` (default: development). Production enables strict startup secret validation. |
+| `ADMIN_API_KEY` | Unique random key (minimum 32 characters), supplied through a secret manager or owner-only untracked `.env`; used only to establish the dashboard's secure server-validated session. |
 | `RATE_LIMIT_PER_MINUTE` | Max webhook requests per minute per client IP (default: 30). |
 | `IDEMPOTENCY_TTL_SECONDS` | How long to remember `request_id` to avoid duplicate orders (default: 86400). |
 | **Exchanges** | |
@@ -247,9 +258,10 @@ Copy `.env.example` to `.env` and fill in your values. All variables are optiona
 | **Trailing stop** | |
 | `TRAILING_STOP_CHECK_INTERVAL_SECONDS` | Interval for trailing-stop background loop (default: 30). |
 | **DB & server** | |
-| `DB_PATH` | SQLite file for idempotency, order history, and risk state (default: webhook_bot.db). |
-| `HOST` | Bind address (default: 0.0.0.0). |
+| `DB_PATH` | Local SQLite file for idempotency, order history, risk state, admin session revocation, and shared rate limits (default: webhook_bot.db). |
+| `HOST` | Bind address (default: 127.0.0.1). Use a private proxy-only network when binding to a container interface. |
 | `PORT` | Server port (default: 8000). |
+| `TRUSTED_PROXY_IPS` | Comma-separated exact proxy IPs trusted to supply `X-Forwarded-Proto` (default: `127.0.0.1`; never use `*` in production). |
 | **AI / LLM** | |
 | `OPENAI_API_KEY` | Required for advisor, enhancer, and signals. |
 | `OPENAI_BASE_URL` | Optional (e.g. Azure or local proxy). |
@@ -257,7 +269,7 @@ Copy `.env.example` to `.env` and fill in your values. All variables are optiona
 | `LLM_ADVISOR_ENABLED` | LLM approve/reject/modify before each order (default: false). |
 | `AI_ENHANCER_ENABLED` | LLM filter/adjust TradingView alerts (default: false). |
 | `AI_SIGNAL_ENABLED` | Enable `POST /signals/generate` (default: false). |
-| `AI_SIGNAL_SECRET` | If set, body must include matching `secret` when calling with `execute=true`. |
+| `AI_SIGNAL_SECRET` | Optional additional secret for `execute=true`; if set in production, must be at least 32 characters and non-placeholder. |
 
 ---
 

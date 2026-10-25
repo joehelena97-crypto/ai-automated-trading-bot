@@ -534,6 +534,11 @@
           </div>
           <div class="flex items-center gap-4">
             <span id="last-update" class="font-mono text-sm text-[#55606e] tabular-nums">—</span>
+            <a href="/admin/login"
+              class="btn-ghost px-3 py-2 rounded-lg text-sm text-[#8891a0]">Admin login</a>
+            <button type="button" onclick="adminLogout()"
+              class="btn-ghost px-2 py-1.5 rounded-lg text-xs text-[#8891a0]">Sign out</button>
+            <span id="admin-auth-message" class="text-xs text-[#8891a0]" role="status"></span>
             <button type="button" onclick="refresh()"
               class="btn-ghost inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-sky-400">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -619,7 +624,7 @@
     var PNL_HISTORY_LEN = 48;
     var EXCHANGES = ['binance', 'bybit', 'okx', 'hyperliquid'];
     var selectedExchange = 'binance';
-    var balanceByExchange = { binance: 8424.53, bybit: 12105.34, okx: 6205.75, hyperliquid: 3134.54 };
+    var balanceByExchange = {};
     var lastStatus = null;
     var lastMetrics = null;
     var lastHealth = null;
@@ -1027,7 +1032,9 @@
 
       var pnl = status.daily_pnl_by_exchange || {};
       var exchanges = health.exchanges || {};
-      var exchangeNames = Object.keys(exchanges).length ? Object.keys(exchanges) : [];
+      var exchangeNames = Object.keys(exchanges).filter(function (name) {
+        return exchanges[name] !== 'unconfigured';
+      });
       exchangeNames.forEach(function (name) { ensurePnlHistory(name, pnl[name]); });
       var platformSelect = document.getElementById('platform-select');
       if (platformSelect) platformSelect.value = selectedExchange;
@@ -1036,22 +1043,23 @@
 
       document.getElementById('exchanges').innerHTML = exchangeNames.length
         ? exchangeNames.map(function (name) {
-          var ok = exchanges[name] === 'ok';
+          var state = exchanges[name];
+          var ok = state === 'healthy';
           var label = name.charAt(0).toUpperCase() + name.slice(1);
           var val = pnl[name];
           var bal = balanceByExchange[name];
           var pnlClass = (typeof val === 'number' && val >= 0) ? 'text-emerald-400' : 'text-red-400';
           var pnlStr = typeof val === 'number' ? (val >= 0 ? '+' + val.toFixed(2) : val.toFixed(2)) : '—';
           var balanceStr = (bal != null && typeof bal === 'number') ? bal.toFixed(2) : '—';
-          var statusText = ok ? 'Connected' : 'Error';
-          var statusClass = ok ? 'text-emerald-400' : 'text-red-400';
+          var statusText = state === 'healthy' ? 'Healthy' : (state === 'degraded' ? 'Degraded' : 'Unavailable');
+          var statusClass = ok ? 'text-emerald-400' : (state === 'degraded' ? 'text-amber-400' : 'text-red-400');
           var tileClass = 'card stat-tile exchange-tile p-3 flex flex-col flex-1 min-h-0 ' + (ok ? 'connected' : 'error');
           var graphStats = buildGraphAndStatsForExchange(name);
           return '<div class="' + tileClass + '">' +
             '<div class="flex items-center justify-between mb-2 flex-shrink-0">' +
             '<span class="text-sm font-medium text-[#f0f2f5]">' + escapeHtml(label) + '</span>' +
             '<span class="flex items-center gap-1.5">' +
-            '<span class="w-2 h-2 rounded-full ' + (ok ? 'bg-emerald-400 pulse-dot' : 'bg-red-400') + '"></span>' +
+            '<span class="w-2 h-2 rounded-full ' + (ok ? 'bg-emerald-400 pulse-dot' : (state === 'degraded' ? 'bg-amber-400' : 'bg-red-400')) + '"></span>' +
             '<span class="text-xs ' + statusClass + '">' + escapeHtml(statusText) + '</span>' +
             '</span></div>' +
             '<p id="platform-pnl-line" class="text-xs text-[#55606e] mb-1 flex-shrink-0">Cumulative PnL <span class="font-mono font-semibold ' + pnlClass + '">' + pnlStr + '</span> USDT <span class="text-[#55606e]">(balance ' + balanceStr + ')</span></p>' +
@@ -1154,25 +1162,49 @@
       }
     }
 
+    async function adminLogout() {
+      var message = document.getElementById('admin-auth-message');
+      if (window.location.protocol !== 'https:') {
+        message.textContent = 'Admin sign-out requires HTTPS.';
+        return;
+      }
+      try {
+        var response = await fetch('/admin/session/logout', {
+          method: 'POST',
+          credentials: 'same-origin'
+        });
+        message.textContent = response.ok ? 'Signed out.' : 'Sign-out failed.';
+        refresh();
+      } catch (e) {
+        message.textContent = 'Could not sign out.';
+      }
+    }
+
     async function setNetwork(useTestnet) {
       var base = window.location.origin;
       try {
-        await fetch(base + '/settings/network', {
+        var response = await fetch(base + '/settings/network', {
           method: 'PUT',
+          credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ use_testnet: useTestnet })
         });
-      } catch (e) { /* ignore if server not running */ }
+        if (!response.ok) {
+          alert('Network setting was not changed. Check admin authorization and server status.');
+        }
+      } catch (e) {
+        alert('Could not update the network setting.');
+      }
       refresh();
     }
 
     async function refresh() {
       try {
         var base = window.location.origin;
-        var statusRes = await fetch(base + '/status');
+        var statusRes = await fetch(base + '/status', { credentials: 'same-origin' });
         var healthRes = await fetch(base + '/health/exchanges');
         var status = statusRes.ok ? await statusRes.json() : {};
-        var health = healthRes.ok ? await healthRes.json() : {};
+        var health = await healthRes.json();
         lastStatus = status;
         lastMetrics = status.metrics || { webhooks_received: 0, orders_placed: 0, webhooks_risk_rejected: 0, errors: 0 };
         lastHealth = { exchanges: health.exchanges || health || {} };
@@ -1188,7 +1220,7 @@
 
     async function syncNetworkFromServer() {
       try {
-        var res = await fetch(window.location.origin + '/status');
+        var res = await fetch(window.location.origin + '/status', { credentials: 'same-origin' });
         if (res.ok) {
           var data = await res.json();
           if (data.use_testnet !== undefined && (lastStatus && lastStatus.use_testnet) !== data.use_testnet) {

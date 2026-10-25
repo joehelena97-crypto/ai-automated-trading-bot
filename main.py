@@ -11,5 +11,7 @@ if __name__ == "__main__":
         "server:app",
         host=settings.host,
         port=settings.port,
+        proxy_headers=True,
+        forwarded_allow_ips=settings.trusted_proxy_ips,
         reload=False,
     )

@@ -12,6 +12,8 @@ from exchanges.bybit import BybitExchange
 from exchanges.hyperliquid import HyperliquidExchange
 from exchanges.okx import OKXExchange
 
+SUPPORTED_EXCHANGES = ("binance", "bybit", "okx", "hyperliquid")
+
 _registry: Dict[str, ExchangeBase] = {}
 
 
