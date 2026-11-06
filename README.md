@@ -1,6 +1,6 @@
 # 📈 TradingView Webhook Bot – Auto Execute Crypto Strategies
 
-> **For traders:** Keep your edge on the chart. Execute on exchange in seconds—with risk limits, TP/SL, and optional AI. No coding required once it’s set up.
+> **:** Keep your edge on the chart. Execute on exchange in seconds—with risk limits, TP/SL, and optional AI. No coding required once it’s set up.
 
 I can help you grow your profit, deliver what you need, and keep your trading safe and rewarding—with risk controls, clear execution, and support when you need it.
 
